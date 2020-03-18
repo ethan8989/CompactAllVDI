@@ -102,7 +102,7 @@ Show what VM disks will be compacted.
 ### Todos
 
 - [ ] Kill orphaned VBoxSDS processes if running as Administrator
-- [ ] Detail how many GB are freed up and percentage change
+- [x] Detail how many GB are freed up and percentage change [18-Mar-2020]
 - [ ] Verify operation on virtual machines with multiple vdi disks
 
 License
