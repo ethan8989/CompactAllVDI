@@ -71,10 +71,12 @@
 .NOTES
     Author: Ethan Hansen/Dry Creek Photo/www.drycreekphoto.com
     Last Edit: 2020-02-12
-    Version 1.0  - 2020-02-10 First public release
-    Version 1.1  - 2020-02-12 Verifies that ClonVDI.exe is version 3.02 or >= 4.01
-    Version 1.2  - 2020-03-10 Terminates any orphaned VBoxSVC processes
-                              still running after VirtualBox.exe closed.
+    Version 1.0     - 2020-02-10 First public release
+    Version 1.1     - 2020-02-12 Verifies that ClonVDI.exe is version 3.02 or >= 4.01
+    Version 1.2     - 2020-03-10 Terminates any orphaned VBoxSVC processes
+                                 still running after VirtualBox.exe closed.
+    Version 1.2.1   - 2020-03-18 Reports file size reduction (or increase) for each
+                                 vdi disk processed and total for all disks.
 
     Released under the MIT license
     Copyright (c) 2020 Dry Creek Photo
@@ -270,6 +272,12 @@ Function Compact-All {
         $vdiNamesArray.Add(-join('"', [regex]::Match($mn, '=\"(.+\.vdi)\"').groups[1].value, '"')) | Out-Null
     }
 
+    # File size variables
+    $OrigFSize = 0         # Size of uncompacted vdi disk in GB
+    $OrigTotalFSize = 0    # Total size of alll uncompacted disks so far
+    $CompactFSize = 0      # Size of compacted disk
+    $CompactTotalFSize = 0 # You guessed it
+    
     # Get file info for each vdi disk to process
     $numDisks = $vdiNamesArray.Count
     $currentDisk = 0
@@ -286,18 +294,45 @@ Function Compact-All {
         }
         else {
             Write-Host "Processing virtual disk $currentDisk of $numDisks."
+            # Get size of original disk
+            $OrigFSize = (Get-Item $vdi).Length/1GB
+
             # Compact the disk. Allow WhatIf support
             if (Compact-VM -vdiDisk $vdi -vdiClone $vdiClone -CloneVDIexePath $CloneVDIexePath) {
                 # Success. Delete original file, rename clone to main disk
                 # Set flag for WhatIf mode to show what would happen
+                $CompactFSize = (Get-Item $vdiClone).Length/1GB
+                if ($OrigFSize -lt $CompactFSize) {
+                    $strFilesize = "increased"
+                    $GBFile = $CompactFSize - $OrigFSize
+                }      
+                else {
+                    $strFilesize = "reduced"
+                    $GBFile = $OrigFSize - $CompactFSize
+                }
                 ($JustTesting = !$PSCmdlet.ShouldProcess($vdi, 'WhatIf Mode')) | Out-Null
-                 if ((Test-Path $vdiClone -PathType Leaf) -or $JustTesting) {
+                if ((Test-Path $vdiClone -PathType Leaf) -or $JustTesting) {
                     Write-Host "Moving clone to $vdiFile"
                     if ($PSCmdlet.ShouldProcess($vdi, 'Deleting original VDI disk')) {
                         DeleteToRecycleBin -FileToDelete $vdi
                     }
                     if ($PSCmdlet.ShouldProcess($vdiClone, "Renaming clone to $vdiFile")) {
                         Rename-Item -Path $vdiClone -NewName $vdiFile
+                        $OrigTotalFSize += $OrigFSize
+                        $CompactTotalFSize += $CompactFSize
+                        if ($OrigTotalFSize -lt $CompactTotalFSize) {
+                            $strTotalsize = "increase"
+                            $GBTotal = $CompactTotalFSize - $OrigTotalFSize
+                            $pctTotal = (100 * ($CompactTotalFSize - $OrigTotalFSize)/$OrigTotalFSize)
+                        }
+                        else {
+                            $strTotalsize = "savings"
+                            $GBTotal = $OrigTotalFSize - $CompactTotalFSize
+                            $pctTotal = (100 * ($OrigTotalFSize - $CompactTotalFSize)/$OrigTotalFSize)
+                        }
+                        Write-Host $vdiFile -BackgroundColor Black -ForegroundColor Green -NoNewline
+                        $strStatus = " {0} {1:n2}GB. Total {2} {3:n2}GB ({4:n1}%)" -f $strFilesize, $GBFile, $strTotalsize, $GBTotal, $pctTotal
+                        Write-Host $strStatus
                     }
                     if ($EmptyRecycleBin) {
                         if ($PSCmdlet.ShouldProcess($vdiDrive, "Emptying recycle bin for $vdiDrive")) {
@@ -619,8 +654,8 @@ exit 0
 # SIG # Begin signature block
 # MIIctwYJKoZIhvcNAQcCoIIcqDCCHKQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAZEFtb5BJbILuf
-# FcdYJ9lrAVsQUm1jrPoaigXumYeVbKCCF70wggUnMIIED6ADAgECAhACpD0TXDDQ
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDcHP4VssdAR1nq
+# 1y3jHaZvbzHv1bZ0U1tMn9e6Ta5yvqCCF70wggUnMIIED6ADAgECAhACpD0TXDDQ
 # araH1r3JF61EMA0GCSqGSIb3DQEBCwUAMHYxCzAJBgNVBAYTAlVTMRUwEwYDVQQK
 # EwxEaWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5jb20xNTAzBgNV
 # BAMTLERpZ2lDZXJ0IFNIQTIgSGlnaCBBc3N1cmFuY2UgQ29kZSBTaWduaW5nIENB
@@ -752,23 +787,23 @@ exit 0
 # LERpZ2lDZXJ0IFNIQTIgSGlnaCBBc3N1cmFuY2UgQ29kZSBTaWduaW5nIENBAhAC
 # pD0TXDDQaraH1r3JF61EMA0GCWCGSAFlAwQCAQUAoIGEMBgGCisGAQQBgjcCAQwx
 # CjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwGCisGAQQBgjcCAQQwHAYKKwYBBAGC
-# NwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZIhvcNAQkEMSIEIC1LuDq6ElaOOTuW
-# XbpdDfy+4uVdg3sP402V7LHe/o63MA0GCSqGSIb3DQEBAQUABIIBABUffE0ON5Fi
-# +FWAju6n81uR1hlGb0UHfR6v8Z8LRLagKIICkws7U//e5T8+IwsDuG8uEg6WRB0A
-# QHvLUrnRS26Aw5KE+ZyQi/1FeSZ8RlEHWNqqMv3/Hymhtl+YkxjTguAlCY13z3Dv
-# yicebm2EyTqEhPWjlxLvsuWqSAFvaT0Wj57g4nae3rS20wTlBTvTaIj/McsyILP9
-# YQNNKwErfSpsJxoMn3pUqMV+kAX3HY0VhSKl0qn8T7xOWaf1LxEf1rcZKU5X3h42
-# SD0PhJMF77n1uLcaqMl8ld0a6bN8mFcTPG0nSkuC8BniHKVg9UooXuQcLToqm+h3
-# v8rNHo8WhT6hggIPMIICCwYJKoZIhvcNAQkGMYIB/DCCAfgCAQEwdjBiMQswCQYD
+# NwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZIhvcNAQkEMSIEIGnc0snrPX2yqtPJ
+# fXIOwA/THzcxiFuCy6BTl5uuO3F9MA0GCSqGSIb3DQEBAQUABIIBABBvD9q0JQ3r
+# Z8LudPBmcHeq2VfF+jDAbNNRPFsc/Q9JFzi6kf7N5oYjsi3GJDPOfUOFTRYCh3tk
+# 7LsXSof9Ba6R63ayx0wIC6IZ9iZNIWDgtcIP7tsU/kz99Z88vz6Hh1nVwuI4T9yS
+# A6QxFwOcMThM95Qkb+SNy1XnIqOEadmRGkd729NZR1kiCH5R6lY0JNzDbERI5PeI
+# rAfr6789nOjAx1WV+LMe9hsto/obnJ4xplfOsz6vH+TLVXg1L2LZ3tp62ha12Xse
+# r+7mfFYk2CaO1rZRCAJjbVas4Kh71kO4kx8DfdeH+ZijQjWMmOgzyUqP3gCXYiNb
+# lVbDJBkHoZWhggIPMIICCwYJKoZIhvcNAQkGMYIB/DCCAfgCAQEwdjBiMQswCQYD
 # VQQGEwJVUzEVMBMGA1UEChMMRGlnaUNlcnQgSW5jMRkwFwYDVQQLExB3d3cuZGln
 # aWNlcnQuY29tMSEwHwYDVQQDExhEaWdpQ2VydCBBc3N1cmVkIElEIENBLTECEAMB
 # mgI6/1ixa9bV6uYX8GYwCQYFKw4DAhoFAKBdMBgGCSqGSIb3DQEJAzELBgkqhkiG
-# 9w0BBwEwHAYJKoZIhvcNAQkFMQ8XDTIwMDMxMTIwMTc0OFowIwYJKoZIhvcNAQkE
-# MRYEFEqMXRluShXDEMmqfF0WKd7j+7bpMA0GCSqGSIb3DQEBAQUABIIBACga8s0I
-# cjHizsvzjksH1HXtFaDnuE/g19F8C1JrOdzhwvk/CfkPoOOJCg5y/NADqcMtYBBL
-# Jg9laQG6Ey+Eebp1wko2B+TYy/aOGakxYO5ySLNvHwrn6dfdB1KRBgPLLEsIE8OG
-# LsGvDM3gmjdD8IeSCO6tsag2Q/lh3J07Hq7LpVfSdKcqYMhKlwP8Rswk/xobNyap
-# gSHJUlmXKj5Eg0ZCiA9dCHZ5uTR7+IVeG6JD0Q0EZtBT4OQ4I65rhVVNHIkbKKfT
-# FjXJLaOBFiMYJtKUpwNQ/c2FqkKc9UAxAidUBKI5Kc8z7P8p/t+qhFDt+l0YbuJE
-# DGiIjuP16ss3JMw=
+# 9w0BBwEwHAYJKoZIhvcNAQkFMQ8XDTIwMDMxODIwMTE0OVowIwYJKoZIhvcNAQkE
+# MRYEFDxoG0jzeTV3hlqGCb9dX7yTSQbDMA0GCSqGSIb3DQEBAQUABIIBAIkEwmYh
+# DflaSgparW0mC3AapJO/QkOZZKQVfLTHQwdmwm50qv35Y6l3S34ptS9TXGi9x9Z+
+# yUtgrvrOi8j8cwK4zbDuiJWQNMZyhv/iXNf3qBM8OtfCJRG+nD4hPOjUMZolOl4g
+# TLkPqUCBGAyxfMi07Nr+qGDbteDagJWfb0JP/hNm4A+wK+hw/RPFA+8U0FQXzZAu
+# Xa78tLQrqRWQqZMmxm4wx99q2mwCM4oDNCCKQM5ZzQTdAHmvYJN0YGP0KACerF3Z
+# PsimH+jkG8ICkSHxfWGFVop7F6fKxfsV1euCXCYmQHdgRyZ8BuH0DUSWklUNBcRX
+# as4AYKG7pPbCtBg=
 # SIG # End signature block

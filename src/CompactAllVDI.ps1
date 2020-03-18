@@ -71,10 +71,12 @@
 .NOTES
     Author: Ethan Hansen/Dry Creek Photo/www.drycreekphoto.com
     Last Edit: 2020-02-12
-    Version 1.0  - 2020-02-10 First public release
-    Version 1.1  - 2020-02-12 Verifies that ClonVDI.exe is version 3.02 or >= 4.01
-    Version 1.2  - 2020-03-10 Terminates any orphaned VBoxSVC processes
-                              still running after VirtualBox.exe closed.
+    Version 1.0     - 2020-02-10 First public release
+    Version 1.1     - 2020-02-12 Verifies that ClonVDI.exe is version 3.02 or >= 4.01
+    Version 1.2     - 2020-03-10 Terminates any orphaned VBoxSVC processes
+                                 still running after VirtualBox.exe closed.
+    Version 1.2.1   - 2020-03-18 Reports file size reduction (or increase) for each
+                                 vdi disk processed and total for all disks.
 
     Released under the MIT license
     Copyright (c) 2020 Dry Creek Photo
@@ -270,6 +272,12 @@ Function Compact-All {
         $vdiNamesArray.Add(-join('"', [regex]::Match($mn, '=\"(.+\.vdi)\"').groups[1].value, '"')) | Out-Null
     }
 
+    # File size variables
+    $OrigFSize = 0         # Size of uncompacted vdi disk in GB
+    $OrigTotalFSize = 0    # Total size of alll uncompacted disks so far
+    $CompactFSize = 0      # Size of compacted disk
+    $CompactTotalFSize = 0 # You guessed it
+    
     # Get file info for each vdi disk to process
     $numDisks = $vdiNamesArray.Count
     $currentDisk = 0
@@ -286,18 +294,45 @@ Function Compact-All {
         }
         else {
             Write-Host "Processing virtual disk $currentDisk of $numDisks."
+            # Get size of original disk
+            $OrigFSize = (Get-Item $vdi).Length/1GB
+
             # Compact the disk. Allow WhatIf support
             if (Compact-VM -vdiDisk $vdi -vdiClone $vdiClone -CloneVDIexePath $CloneVDIexePath) {
                 # Success. Delete original file, rename clone to main disk
                 # Set flag for WhatIf mode to show what would happen
+                $CompactFSize = (Get-Item $vdiClone).Length/1GB
+                if ($OrigFSize -lt $CompactFSize) {
+                    $strFilesize = "increased"
+                    $GBFile = $CompactFSize - $OrigFSize
+                }      
+                else {
+                    $strFilesize = "reduced"
+                    $GBFile = $OrigFSize - $CompactFSize
+                }
                 ($JustTesting = !$PSCmdlet.ShouldProcess($vdi, 'WhatIf Mode')) | Out-Null
-                 if ((Test-Path $vdiClone -PathType Leaf) -or $JustTesting) {
+                if ((Test-Path $vdiClone -PathType Leaf) -or $JustTesting) {
                     Write-Host "Moving clone to $vdiFile"
                     if ($PSCmdlet.ShouldProcess($vdi, 'Deleting original VDI disk')) {
                         DeleteToRecycleBin -FileToDelete $vdi
                     }
                     if ($PSCmdlet.ShouldProcess($vdiClone, "Renaming clone to $vdiFile")) {
                         Rename-Item -Path $vdiClone -NewName $vdiFile
+                        $OrigTotalFSize += $OrigFSize
+                        $CompactTotalFSize += $CompactFSize
+                        if ($OrigTotalFSize -lt $CompactTotalFSize) {
+                            $strTotalsize = "increase"
+                            $GBTotal = $CompactTotalFSize - $OrigTotalFSize
+                            $pctTotal = (100 * ($CompactTotalFSize - $OrigTotalFSize)/$OrigTotalFSize)
+                        }
+                        else {
+                            $strTotalsize = "savings"
+                            $GBTotal = $OrigTotalFSize - $CompactTotalFSize
+                            $pctTotal = (100 * ($OrigTotalFSize - $CompactTotalFSize)/$OrigTotalFSize)
+                        }
+                        Write-Host $vdiFile -BackgroundColor Black -ForegroundColor Green -NoNewline
+                        $strStatus = " {0} {1:n2}GB. Total {2} {3:n2}GB ({4:n1}%)" -f $strFilesize, $GBFile, $strTotalsize, $GBTotal, $pctTotal
+                        Write-Host $strStatus
                     }
                     if ($EmptyRecycleBin) {
                         if ($PSCmdlet.ShouldProcess($vdiDrive, "Emptying recycle bin for $vdiDrive")) {
