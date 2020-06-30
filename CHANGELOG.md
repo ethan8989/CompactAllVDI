@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+### [1.2.3](https://github.com/ethan8989/CompactAllVDI/compare/v1.2.2...v1.2.3) (2020-03-18) 
+#### Change
+- Changed delete to recycle bin function to use VB FileIO method rather than shell verb
+
+
 ### [1.2.2](https://github.com/ethan8989/CompactAllVDI/compare/v1.2...v1.2.2) (2020-03-18) 
 #### Added
 - Report file size reduction (or increase) for each vdi disk after compaction
